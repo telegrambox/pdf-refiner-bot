@@ -209,15 +209,8 @@ bot.on('document', async (ctx) => {
     return ctx.reply('⚠️ Please send a PDF file (.pdf).');
   }
 
-  // Inform user processing started
-  let statusMsg;
   try {
-    statusMsg = await ctx.reply('⏳ Processing your PDF (watermarking & attaching ending page)...');
-  } catch (e) {
-    // Ignore error if temporary message fails
-  }
-
-  try {
+    await ctx.sendChatAction('upload_document');
     const fileLink = await ctx.telegram.getFileLink(doc.file_id);
     const response = await axios.get(fileLink.href, { responseType: 'arraybuffer' });
     const inputPdfBuffer = Buffer.from(response.data);
@@ -233,25 +226,10 @@ bot.on('document', async (ctx) => {
     const baseName = fileName.replace(/\.pdf$/i, '');
     const outFileName = `${baseName}_planned.pdf`;
 
-    // Send processed PDF back
-    await ctx.replyWithDocument(
-      { source: processedBuffer, filename: outFileName },
-      { caption: '✨ Here is your refined PDF with ending page & watermark!' }
-    );
-
-    // Clean up processing message
-    if (statusMsg) {
-      try {
-        await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
-      } catch (e) {}
-    }
+    // Send processed PDF back with NO caption or extra text
+    await ctx.replyWithDocument({ source: processedBuffer, filename: outFileName });
   } catch (err) {
     console.error('Error processing PDF for user', userId, err);
-    if (statusMsg) {
-      try {
-        await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id);
-      } catch (e) {}
-    }
     ctx.reply(`❌ Failed to process PDF: ${err.message || 'Unknown error'}`);
   }
 });
