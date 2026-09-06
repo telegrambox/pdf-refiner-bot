@@ -14,7 +14,7 @@ import {
 
 dotenv.config();
 
-const BOT_TOKEN = process.env.BOT_TOKEN || '8874505167:AAFUj888x4jQFjbPMF3Zad2b0MDwwYwtwMM';
+const BOT_TOKEN = process.env.BOT_TOKEN;
 
 if (!BOT_TOKEN) {
   console.error('ERROR: BOT_TOKEN is missing!');
@@ -23,7 +23,6 @@ if (!BOT_TOKEN) {
 
 const bot = new Telegraf(BOT_TOKEN);
 
-// Helper to build settings keyboard
 function getSettingsKeyboard(userId) {
   const settings = getUserSettings(userId);
   const wmStatus = settings.watermarkEnabled ? '🟢 ON' : '🔴 OFF';
@@ -51,7 +50,6 @@ function getSettingsMessage(userId) {
   );
 }
 
-// /start command
 bot.start((ctx) => {
   const userId = ctx.from.id;
   const name = ctx.from.first_name || 'there';
@@ -68,25 +66,22 @@ bot.start((ctx) => {
   );
 });
 
-// /settings command
 bot.command('settings', (ctx) => {
   const userId = ctx.from.id;
   ctx.replyWithMarkdown(getSettingsMessage(userId), getSettingsKeyboard(userId));
 });
 
-// /help command
 bot.command('help', (ctx) => {
   ctx.replyWithMarkdown(
     `📖 *PDF Refiner Bot Help:*\n\n` +
     `• *Process a PDF:* Simply upload any PDF document.\n` +
-    `• *Toggle Watermark:* Use /settings to turn watermark ON or OFF.\n` +
+    `• *Toggle Watermark:* Use /settings to turn watermark ON/OFF.\n` +
     `• *Custom Watermark:* Tap "Watermark" in /settings, then send an image.\n` +
-    `• *Custom Ending Page:* Tap "Ending PDF" in /settings, then send a single ending PDF.\n` +
+    `• *Custom Ending Page:* Tap "Ending PDF" in /settings, then send a PDF.\n` +
     `• *Reset:* Tap "Reset to Defaults" to restore original settings.\n`
   );
 });
 
-// Callback: Toggle Watermark
 bot.action('toggle_watermark', async (ctx) => {
   const userId = ctx.from.id;
   toggleWatermark(userId);
@@ -101,29 +96,20 @@ bot.action('toggle_watermark', async (ctx) => {
   }
 });
 
-// Callback: Change Watermark
 bot.action('change_watermark', async (ctx) => {
   const userId = ctx.from.id;
   setAwaitingAction(userId, 'upload_watermark');
   await ctx.answerCbQuery();
-  await ctx.reply(
-    '🖼️ Send me the new image (PNG or JPG) you want to use as your watermark.\n' +
-    'Or send /cancel to keep current settings.'
-  );
+  await ctx.reply('🖼️ Send the new PNG/JPG watermark image.\nOr send /cancel to keep current settings.');
 });
 
-// Callback: Change Ending PDF
 bot.action('change_ending', async (ctx) => {
   const userId = ctx.from.id;
   setAwaitingAction(userId, 'upload_ending');
   await ctx.answerCbQuery();
-  await ctx.reply(
-    '📄 Send me the new PDF file you want to use as your default ending page.\n' +
-    'Or send /cancel to keep current settings.'
-  );
+  await ctx.reply('📄 Send the new PDF ending file.\nOr send /cancel to keep current settings.');
 });
 
-// Callback: Reset to Defaults
 bot.action('reset_defaults', async (ctx) => {
   const userId = ctx.from.id;
   resetUserSettings(userId);
@@ -138,14 +124,12 @@ bot.action('reset_defaults', async (ctx) => {
   }
 });
 
-// /cancel command
 bot.command('cancel', (ctx) => {
   const userId = ctx.from.id;
   setAwaitingAction(userId, null);
   ctx.reply('Action cancelled. You can send your PDFs anytime!');
 });
 
-// Handle incoming photos (for custom watermark)
 bot.on('photo', async (ctx) => {
   const userId = ctx.from.id;
   const settings = getUserSettings(userId);
@@ -155,11 +139,9 @@ bot.on('photo', async (ctx) => {
       const photos = ctx.message.photo;
       const largestPhoto = photos[photos.length - 1];
       const fileLink = await ctx.telegram.getFileLink(largestPhoto.file_id);
-
       const response = await axios.get(fileLink.href, { responseType: 'arraybuffer' });
       setCustomWatermark(userId, Buffer.from(response.data));
-
-      return ctx.reply('✅ Custom watermark image saved successfully! Now all your PDFs will use this watermark.');
+      return ctx.reply('✅ Custom watermark image saved successfully!');
     } catch (err) {
       console.error('Error saving photo watermark:', err);
       return ctx.reply('❌ Failed to save watermark image. Please try sending it as an uncompressed file/document.');
@@ -169,7 +151,6 @@ bot.on('photo', async (ctx) => {
   ctx.reply('To update your watermark, use /settings first and choose "Watermark".');
 });
 
-// Handle incoming documents (PDFs or image documents)
 bot.on('document', async (ctx) => {
   const userId = ctx.from.id;
   const settings = getUserSettings(userId);
@@ -178,7 +159,6 @@ bot.on('document', async (ctx) => {
   const isPdf = fileName.toLowerCase().endsWith('.pdf') || doc.mime_type === 'application/pdf';
   const isImage = doc.mime_type?.startsWith('image/') || /\.(png|jpg|jpeg)$/i.test(fileName);
 
-  // Check if user is uploading a custom watermark
   if (settings.awaitingAction === 'upload_watermark' && isImage) {
     try {
       const fileLink = await ctx.telegram.getFileLink(doc.file_id);
@@ -191,7 +171,6 @@ bot.on('document', async (ctx) => {
     }
   }
 
-  // Check if user is uploading a custom ending PDF
   if (settings.awaitingAction === 'upload_ending' && isPdf) {
     try {
       const fileLink = await ctx.telegram.getFileLink(doc.file_id);
@@ -204,7 +183,6 @@ bot.on('document', async (ctx) => {
     }
   }
 
-  // Otherwise, handle regular PDF processing
   if (!isPdf) {
     return ctx.reply('⚠️ Please send a PDF file (.pdf).');
   }
@@ -215,18 +193,14 @@ bot.on('document', async (ctx) => {
     const response = await axios.get(fileLink.href, { responseType: 'arraybuffer' });
     const inputPdfBuffer = Buffer.from(response.data);
 
-    // Process PDF
     const processedBuffer = await processPdfDocument(inputPdfBuffer, {
       watermarkEnabled: settings.watermarkEnabled,
       customWatermark: settings.customWatermark,
       customEndingPdf: settings.customEndingPdf
     });
 
-    // Generate output filename
     const baseName = fileName.replace(/\.pdf$/i, '');
     const outFileName = `${baseName}_planned.pdf`;
-
-    // Send processed PDF back with NO caption or extra text
     await ctx.replyWithDocument({ source: processedBuffer, filename: outFileName });
   } catch (err) {
     console.error('Error processing PDF for user', userId, err);
@@ -234,22 +208,19 @@ bot.on('document', async (ctx) => {
   }
 });
 
-// Launch Telegraf Bot
 bot.launch().then(() => {
   console.log('🤖 Telegram PDF Bot started successfully and listening for messages!');
 }).catch((err) => {
   console.error('Failed to launch bot:', err);
 });
 
-// Create minimal HTTP server for Render Free Web Service deployment
 const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('Telegram PDF Bot is running 24/7 on Render!\n');
+  res.end('Telegram PDF Bot health check is OK.\n');
 }).listen(PORT, () => {
   console.log(`🌐 HTTP health-check server running on port ${PORT}`);
 });
 
-// Graceful shutdown
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
